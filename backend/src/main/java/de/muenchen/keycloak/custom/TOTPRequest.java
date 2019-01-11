@@ -11,15 +11,6 @@ package de.muenchen.keycloak.custom;
  */
 public class TOTPRequest {
     private String username;
-    private String realm;
-
-    public String getRealm() {
-        return realm;
-    }
-
-    public void setRealm(String realm) {
-        this.realm = realm;
-    }
 
     public String getUsername() {
         return username;

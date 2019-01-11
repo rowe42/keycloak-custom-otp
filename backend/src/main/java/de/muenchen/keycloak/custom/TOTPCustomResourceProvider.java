@@ -6,27 +6,25 @@ import org.keycloak.services.resource.RealmResourceProvider;
 import javax.ws.rs.POST;
 import javax.ws.rs.Produces;
 import org.jboss.logging.Logger;
-import org.keycloak.services.managers.AppAuthManager;
-import org.keycloak.services.managers.AuthenticationManager;
-import java.util.Set;
 import javax.ws.rs.BadRequestException;
 import javax.ws.rs.ForbiddenException;
-import javax.ws.rs.NotAuthorizedException;
+import javax.ws.rs.core.Context;
+import javax.ws.rs.core.HttpHeaders;
 import org.keycloak.forms.login.freemarker.model.TotpBean;
 import org.keycloak.models.KeycloakContext;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.RoleModel;
 import org.keycloak.models.UserCredentialModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
+import org.keycloak.services.resources.admin.AdminAuth;
+import org.keycloak.services.resources.admin.AdminRoot;
+import org.keycloak.services.resources.admin.permissions.AdminPermissions;
 
 
 
-public class TOTPCustomResourceProvider implements RealmResourceProvider {
+public class TOTPCustomResourceProvider extends AdminRoot implements RealmResourceProvider {
 
     protected static final Logger LOG = Logger.getLogger(TOTPCustomResourceProvider.class);
-    private final KeycloakSession session;
-    private AuthenticationManager.AuthResult auth;
 
     public TOTPCustomResourceProvider(KeycloakSession session) {
         this.session = session;
@@ -40,30 +38,23 @@ public class TOTPCustomResourceProvider implements RealmResourceProvider {
     
     @POST
     @Produces("application/json")
-    public TOTPResponse post(TOTPRequest totpRequest)  {
+    public TOTPResponse post(@Context final HttpHeaders headers, TOTPRequest totpRequest)  {
         KeycloakContext context = session.getContext();
+        RealmModel targetRealm = context.getRealm(); //schon hier abholen; context.getRealm ändert sich nach Aufruf von authenticateRealmAdminRequest!
         
-        //check if current user is authenticated and authorized (checks berer token)
-        auth = new AppAuthManager().authenticateBearerToken(session, session.getContext().getRealm());
-        checkAdmin();
+        //check if current user is authenticated and authorized (checks bearer token)        
+        AdminAuth auth = authenticateRealmAdminRequest(headers);
+        if (!AdminPermissions.realms(session, auth).isAdmin(targetRealm)) {
+            LOG.error("User with given Access Token is not admin for realm " +targetRealm.getName());
+            throw new ForbiddenException();
+        }
 
         //check inputs
         String username = totpRequest.getUsername();
-        String targetRealmName = totpRequest.getRealm();
         if (username == null) {
             LOG.error("Username missing!");
             throw new BadRequestException("Username missing!");
-        } else if (targetRealmName == null) {
-            LOG.error("Target realm missing!");
-            throw new BadRequestException("Target realm missing!");
-        }
-
-        //find realm where user with new otp should be
-        RealmModel targetRealm = session.realms().getRealmByName(totpRequest.getRealm());
-        if (targetRealm == null) {
-            throw new BadRequestException("Realm missing or wrong!");
-        }
-
+        } 
         
         //search user in DB in target realm
         LOG.info("Searching user in Realm " + targetRealm.getName() + " with username " + username);
@@ -101,37 +92,4 @@ public class TOTPCustomResourceProvider implements RealmResourceProvider {
     public void close() {
     }
     
-    private void checkAdmin() {
-        if (auth == null) {
-            LOG.error("No Bearer token found or token not valid");
-            throw new NotAuthorizedException("Bearer");
-        }
-        
-        LOG.info("roleMappings of current user:");
-        logRoles(auth.getUser().getRoleMappings());
-        LOG.info("realmRoleMappings of current user:");
-        logRoles(auth.getUser().getRealmRoleMappings());
-        
-        if (!userHasRole(auth.getUser().getRoleMappings(), "admin") && //global admin
-                !userHasRole(auth.getUser().getRealmRoleMappings(), "manage-users")) { //local admin for users
-            throw new ForbiddenException("Does not have global admin role or ream role manage-users");
-        }
-    }
-
-    private boolean userHasRole(Set<RoleModel> roleMappings, String role) {
-        if (roleMappings == null) return false;
-        
-        for (RoleModel roleModel : roleMappings) {
-            if (roleModel.getName().equals(role)) {
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    private void logRoles(Set<RoleModel> roleMappings) {
-        for (RoleModel roleModel : roleMappings) {
-            LOG.info(roleModel.getName());
-        }
-    }
 }
