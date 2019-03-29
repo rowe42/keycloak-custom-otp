@@ -11,13 +11,16 @@ import javax.ws.rs.ForbiddenException;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import org.keycloak.forms.login.freemarker.model.TotpBean;
+import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakContext;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.RoleModel;
 import org.keycloak.models.UserCredentialModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.services.resources.admin.AdminAuth;
 import org.keycloak.services.resources.admin.AdminRoot;
+import org.keycloak.services.resources.admin.ScopeMappedClientResource;
 import org.keycloak.services.resources.admin.permissions.AdminPermissions;
 
 
@@ -42,12 +45,20 @@ public class TOTPCustomResourceProvider extends AdminRoot implements RealmResour
         KeycloakContext context = session.getContext();
         RealmModel targetRealm = context.getRealm(); //schon hier abholen; context.getRealm ändert sich nach Aufruf von authenticateRealmAdminRequest!
         
-        //check if current user is authenticated and authorized (checks bearer token)        
+        //check if current user is authenticated and authorized (checks bearer token) as (local or global) admin
         AdminAuth auth = authenticateRealmAdminRequest(headers);
         if (!AdminPermissions.realms(session, auth).isAdmin(targetRealm)) {
             LOG.error("User with given Access Token is not admin for realm " +targetRealm.getName());
             throw new ForbiddenException();
         }
+        
+        //check if current user has specific admin-role "manage-users" (directly or indirectly via composite roles)
+        ClientModel realmManagementClient = context.getRealm().getClientByClientId("realm-management");
+        RoleModel role = realmManagementClient.getRole("manage-users");
+        if (!auth.getUser().hasRole(role)) {
+            throw new ForbiddenException();
+        }
+
 
         //check inputs
         String username = totpRequest.getUsername();
